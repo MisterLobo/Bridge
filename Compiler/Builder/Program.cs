@@ -1,7 +1,6 @@
 using Bridge.Contract;
 using Bridge.Translator;
 using Bridge.Translator.Logging;
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -244,6 +243,13 @@ namespace Bridge.Builder
                         bridgeOptions.Folder = Path.Combine(Environment.CurrentDirectory, args[++i]);
                         break;
 
+                    case "-rp":
+                    case "-referencespath": // backwards compatibility
+                    case "--referencespath":
+                        bridgeOptions.ReferencesPath = args[++i];
+                        bridgeOptions.ReferencesPath = Path.IsPathRooted(bridgeOptions.ReferencesPath) ? bridgeOptions.ReferencesPath : Path.Combine(Environment.CurrentDirectory, bridgeOptions.ReferencesPath);
+                        break;
+
                     case "-R":
                     case "-recursive": // backwards compatibility
                     case "--recursive":
@@ -344,16 +350,12 @@ namespace Bridge.Builder
                     return null; // error: arguments not provided, so can't guess what to do
                 }
 
-                if (csprojs.Length == 0)
+                if (csprojs.Length > 0)
                 {
-                    logger.Warn("Could not default to a csproj because none were found.");
-                    logger.Error("Error: Project or assembly file name must be specified.");
-                    return null;
-                }
-
-                var csproj = csprojs[0];
-                bridgeOptions.ProjectLocation = csproj;
-                logger.Info("Defaulting Project Location to " + csproj);
+                    var csproj = csprojs[0];
+                    bridgeOptions.ProjectLocation = csproj;
+                    logger.Info("Defaulting Project Location to " + csproj);
+                }                
             }
 
             if (string.IsNullOrEmpty(bridgeOptions.OutputLocation))
@@ -364,6 +366,30 @@ namespace Bridge.Builder
 
             if (bridgeOptions.IsFolderMode)
             {
+                if (string.IsNullOrEmpty(bridgeOptions.Lib))
+                {
+                    var folder = bridgeOptions.Folder ?? Environment.CurrentDirectory;
+
+                    if (!string.IsNullOrWhiteSpace(bridgeOptions.ReferencesPath))
+                    {
+                        bridgeOptions.Lib = Path.Combine(Path.IsPathRooted(bridgeOptions.ReferencesPath) ? bridgeOptions.ReferencesPath : Path.Combine(folder, bridgeOptions.ReferencesPath), new DirectoryInfo(folder).Name + ".dll");
+                    }
+                    else
+                    {
+                        var helper = new Bridge.Contract.ConfigHelper<AssemblyInfo>(logger);
+                        var info = helper.ReadConfig("bridge.json", true, folder, bridgeOptions.ProjectProperties.Configuration);
+
+                        if (!string.IsNullOrWhiteSpace(info.ReferencesPath))
+                        {
+                            bridgeOptions.Lib = Path.Combine(Path.IsPathRooted(info.ReferencesPath) ? info.ReferencesPath : Path.Combine(folder, info.ReferencesPath), new DirectoryInfo(folder).Name + ".dll");
+                        }
+                        else
+                        {
+                            bridgeOptions.Lib = Path.Combine(folder, new DirectoryInfo(folder).Name + ".dll");
+                        }
+                    }                                  
+                }
+
                 bridgeOptions.DefaultFileName = Path.GetFileNameWithoutExtension(bridgeOptions.Lib);
                 bridgeOptions.ProjectProperties.AssemblyName = bridgeOptions.DefaultFileName;
             }
