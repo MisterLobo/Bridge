@@ -9,11 +9,19 @@ using System.Reflection;
 
 namespace Bridge.Builder
 {
-    public class Program
+    public partial class Program
     {
+        private static string[] DEFAULT_REFERENCES_PATHES = new string[] { "bin", "Libs" };
+
         private static int Main(string[] args)
         {
             var logger = new Logger(null, false, LoggerLevel.Info, true, new ConsoleLoggerWriter(), new FileLoggerWriter());
+
+            if (args.Length == 0)
+            {
+                ShowUsage(logger);
+                return 1;
+            }
 
             logger.Info("Executing Bridge.Builder.Console...");
 
@@ -25,7 +33,7 @@ namespace Bridge.Builder
                 return 1;
             }
 
-            if (bridgeOptions.Help)
+            if (bridgeOptions.NoCompilation)
             {
                 return 0;
             }
@@ -45,8 +53,18 @@ namespace Bridge.Builder
             try
             {
                 processor.Process();
+                var outputPath = processor.PostProcess();
 
-                processor.PostProcess();
+                if (bridgeOptions.Run)
+                {
+                    var htmlFile = Path.Combine(outputPath, "index.html");
+
+                    if(File.Exists(htmlFile))
+                    {
+                        System.Diagnostics.Process.Start(htmlFile);
+                    }
+                }
+
             }
             catch (EmitterException ex)
             {
@@ -76,6 +94,38 @@ namespace Bridge.Builder
             }
 
             return 0;
+        }
+
+        private static System.Diagnostics.FileVersionInfo GetCompilerVersion()
+        {
+            var compilerAssembly = typeof(TranslatorProcessor).Assembly;
+            var compilerVersionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(compilerAssembly.Location);
+            return compilerVersionInfo;
+        }
+
+        private static void ShowUsage(ILogger logger)
+        {
+            logger.Warn($@"Bridge.NET
+
+  Version  : {GetCompilerVersion().ProductVersion}
+
+Usage: bridge [commands] [[options] path-to-application]
+
+Common Options:
+  new         Initialize a valid Bridge C# Class Library project. 
+  build       Builds the Bridge project. 
+  run         Compiles and immediately runs the index.html file.
+
+Path to Output folder:
+  {Environment.CurrentDirectory}
+
+To get started on developing applications for Bridge.NET, please see:
+  http://bridge.net/docs");
+        }
+
+        private static void ShowVersion(ILogger logger)
+        {
+            logger.Warn($"Version: {GetCompilerVersion().ProductVersion}");
         }
 
         /// <summary>
@@ -110,6 +160,9 @@ namespace Bridge.Builder
                            [default: current wd].
 -R --recursive             Recursively search for .cs source files inside
                            current workind directory.
+--norecursive              Non-recursive search of .cs source files inside
+                           current workind directory.
+-v --version               Version of Bridge compiler.
 -notimestamp --notimestamp Do not show timestamp in log messages
                            [default: shows timestamp]");
 
@@ -143,6 +196,7 @@ namespace Bridge.Builder
         public static BridgeOptions GetBridgeOptionsFromCommandLine(string[] args, ILogger logger)
         {
             var bridgeOptions = new BridgeOptions();
+            bridgeOptions.Recursive = true;
 
             bridgeOptions.Name = "";
             bridgeOptions.ProjectProperties = new ProjectProperties();
@@ -154,6 +208,7 @@ namespace Bridge.Builder
             var hasPriorityPlatform = false;
             string defineConstants = null;
             var hasPriorityDefineConstants = false;
+            var currentDir = Environment.CurrentDirectory;
 
             int i = 0;
 
@@ -161,6 +216,60 @@ namespace Bridge.Builder
             {
                 switch (args[i])
                 {
+                    case "add":
+                        string entity = null;
+                        if (args.Length > (i + 1))
+                        {
+                            entity = args[++i];
+                        }
+
+                        switch (entity)
+                        {
+                            case "package":
+                                string package = null;
+                                if (args.Length > (i + 1))
+                                {
+                                    package = args[++i];
+                                }
+
+                                if (string.IsNullOrWhiteSpace(package))
+                                {
+                                    throw new Exception("Please define package name.");
+                                }
+
+                                string version = null;
+                                if (args.Length > (i + 2) && (args[i + 1] == "-v" || args[i + 1] == "--version"))
+                                {
+                                    version = args[i + 2];
+                                }
+
+                                AddPackage(logger, bridgeOptions, currentDir, package, version);
+                                
+                                break;
+                            default:
+                                throw new Exception($"{entity} is unknown entity for adding.");
+                        }
+
+                        bridgeOptions.NoCompilation = true;
+                        return bridgeOptions;
+                    case "build":
+                        bridgeOptions.Rebuild = true;
+                        bridgeOptions.Folder = currentDir;
+                        break;
+                    case "run":
+                        bridgeOptions.Folder = currentDir;
+                        bridgeOptions.Run = true;
+                        break;
+                    case "new":
+                        string tpl = "classlib";
+                        if (args.Length > (i + 1) && !args[i+1].StartsWith("-"))
+                        {
+                            tpl = args[++i];
+                        }
+
+                        CreateProject(logger, bridgeOptions, currentDir, tpl);
+                        bridgeOptions.NoCompilation = true;
+                        return bridgeOptions;
                     // backwards compatibility -- now is non-switch argument to builder
                     case "-p":
                     case "-project":
@@ -240,20 +349,24 @@ namespace Bridge.Builder
                     case "-f":
                     case "-folder": // backwards compatibility
                     case "--folder":
-                        bridgeOptions.Folder = Path.Combine(Environment.CurrentDirectory, args[++i]);
+                        bridgeOptions.Folder = Path.Combine(currentDir, args[++i]);
                         break;
 
                     case "-rp":
                     case "-referencespath": // backwards compatibility
                     case "--referencespath":
                         bridgeOptions.ReferencesPath = args[++i];
-                        bridgeOptions.ReferencesPath = Path.IsPathRooted(bridgeOptions.ReferencesPath) ? bridgeOptions.ReferencesPath : Path.Combine(Environment.CurrentDirectory, bridgeOptions.ReferencesPath);
+                        bridgeOptions.ReferencesPath = Path.IsPathRooted(bridgeOptions.ReferencesPath) ? bridgeOptions.ReferencesPath : Path.Combine(currentDir, bridgeOptions.ReferencesPath);
                         break;
 
                     case "-R":
                     case "-recursive": // backwards compatibility
                     case "--recursive":
                         bridgeOptions.Recursive = true;
+                        break;
+
+                    case "--norecursive":
+                        bridgeOptions.Recursive = false;
                         break;
 
                     case "-lib": // backwards compatibility -- now is non-switch argument to builder
@@ -268,8 +381,14 @@ namespace Bridge.Builder
                     case "-h":
                     case "--help":
                         ShowHelp(logger);
-                        bridgeOptions.Help = true;
-                        return bridgeOptions; // success. Asked for help. Help provided.
+                        bridgeOptions.NoCompilation = true;
+                        return bridgeOptions; // success. Asked for help. Help provided
+
+                    case "-v":
+                    case "--version":
+                        ShowVersion(logger);
+                        bridgeOptions.NoCompilation = true;
+                        return bridgeOptions; // success. Asked for version. Version provided.
 
                     case "-notimestamp":
                     case "--notimestamp":
@@ -330,7 +449,7 @@ namespace Bridge.Builder
 
             if (bridgeOptions.ProjectLocation == null && bridgeOptions.Lib == null)
             {
-                var folder = bridgeOptions.Folder ?? Environment.CurrentDirectory;
+                var folder = bridgeOptions.Folder ?? currentDir;
 
                 var csprojs = new string[] { };
 
@@ -368,7 +487,7 @@ namespace Bridge.Builder
             {
                 if (string.IsNullOrEmpty(bridgeOptions.Lib))
                 {
-                    var folder = bridgeOptions.Folder ?? Environment.CurrentDirectory;
+                    var folder = bridgeOptions.Folder ?? currentDir;
 
                     if (!string.IsNullOrWhiteSpace(bridgeOptions.ReferencesPath))
                     {
@@ -377,7 +496,7 @@ namespace Bridge.Builder
                     else
                     {
                         var helper = new Bridge.Contract.ConfigHelper<AssemblyInfo>(logger);
-                        var info = helper.ReadConfig("bridge.json", true, folder, bridgeOptions.ProjectProperties.Configuration);
+                        var info = helper.ReadConfig("bridge.json", true, folder, bridgeOptions.ProjectProperties.Configuration);                        
 
                         if (!string.IsNullOrWhiteSpace(info.ReferencesPath))
                         {
@@ -385,7 +504,18 @@ namespace Bridge.Builder
                         }
                         else
                         {
-                            bridgeOptions.Lib = Path.Combine(folder, new DirectoryInfo(folder).Name + ".dll");
+                            foreach (var path in DEFAULT_REFERENCES_PATHES)
+                            {
+                                var checkFolder = Path.Combine(folder, path);
+                                if (Directory.Exists(checkFolder))
+                                {
+                                    bridgeOptions.ReferencesPath = checkFolder;
+                                    folder = checkFolder;
+                                    break;
+                                }
+                            }
+
+                            bridgeOptions.Lib = Path.Combine(Path.Combine(folder, "bin"), new DirectoryInfo(folder).Name + ".dll");
                         }
                     }                                  
                 }

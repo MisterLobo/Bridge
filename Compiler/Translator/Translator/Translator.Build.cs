@@ -117,6 +117,31 @@ namespace Bridge.Translator
                         list.Add(path);
                     }
                 }
+
+                var packagesPath = Path.GetFullPath((new Uri(Path.Combine(this.Location, "packages"))).LocalPath);
+                if (Directory.Exists(packagesPath))
+                {
+                    var packagesFolders = Directory.GetDirectories(packagesPath, "*", SearchOption.TopDirectoryOnly);
+                    foreach (var packageFolder in packagesFolders)
+                    {
+                        var packageLib = Path.Combine(packageFolder, "lib");
+                        if (Directory.Exists(packageLib))
+                        {
+                            var libsFolders = Directory.GetDirectories(packageLib, "net*", SearchOption.TopDirectoryOnly);
+                            var libFolder = libsFolders.Length > 0 ? (libsFolders.Contains("net40") ? "net40" : libsFolders[0]) : null;
+
+                            if(libFolder != null)
+                            {
+                                var assemblies = Directory.GetFiles(libFolder, "*.dll", SearchOption.TopDirectoryOnly);
+
+                                foreach (var assembly in assemblies)
+                                {
+                                    list.Add(assembly);
+                                }
+                            }                            
+                        }
+                    }
+                }
             }
 
             IList<SyntaxTree> trees = new List<SyntaxTree>(files.Count);

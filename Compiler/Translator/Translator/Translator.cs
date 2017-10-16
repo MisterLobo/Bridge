@@ -102,6 +102,7 @@ namespace Bridge.Translator
             logger.Info("Translating...");            
 
             var config = this.AssemblyInfo;
+
             if (this.Rebuild)
             {
                 logger.Info("Building assembly as Rebuild option is enabled");
@@ -112,8 +113,6 @@ namespace Bridge.Translator
                 logger.Info("Building assembly as it is not found at " + this.AssemblyLocation);
                 this.BuildAssembly();
             }
-
-            this.LogProductInfo();
 
             this.Outputs.Report = new TranslatorOutputItem
             {
@@ -126,6 +125,8 @@ namespace Bridge.Translator
 
             var references = this.InspectReferences();
             this.References = references;
+
+            this.LogProductInfo();
 
             this.Plugins = Bridge.Translator.Plugins.GetPlugins(this, config, logger);
 
